@@ -1,0 +1,8 @@
+{
+  "max_loss_usd": 1.0,
+  "reward_ratio": 5.0,
+  "trigger_ratio": 2.0,
+  "lock_profit_ratio": 1.0,
+  "max_positions": 1,
+  "is_active": true
+}
