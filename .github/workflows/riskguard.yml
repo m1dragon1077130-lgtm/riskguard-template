@@ -1,8 +1,6 @@
 name: RiskGuard
 
 on:
-  schedule:
-    - cron: '0 */5 * * *'
   workflow_dispatch:
 
 jobs:
@@ -18,7 +16,4 @@ jobs:
           python-version: '3.11'
       
       - name: Run RiskGuard
-        env:
-          TT_API_KEY: ${{ secrets.TT_API_KEY }}
-          TT_API_SECRET: ${{ secrets.TT_API_SECRET }}
         run: python riskguard.py
