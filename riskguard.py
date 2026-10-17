@@ -13,23 +13,14 @@ import urllib.request
 import urllib.error
 
 
-# ============================================================
-# تنظیمات ثابت
-# ============================================================
 MAX_RUN_TIME_SECONDS = 5 * 3600 + 50 * 60
 CHECK_INTERVAL_SECONDS = 20
-
 LOCK_STOP_LOSS = True
-
 BASE_URL = "https://apiv2.thetruetrade.io"
 FUTURES_PREFIX = "/futures"
-
 STATE_FILE = "state.json"
 
 
-# ============================================================
-# توابع کمکی
-# ============================================================
 def sign(secret, timestamp, method, uri):
     payload = f"{timestamp}{method}{uri}"
     return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
@@ -38,7 +29,6 @@ def sign(secret, timestamp, method, uri):
 def request(method, uri, body=None, api_key=None, api_secret=None):
     timestamp = str(int(time.time() * 1000))
     signature = sign(api_secret, timestamp, method.upper(), uri)
-
     url = BASE_URL + uri
     headers = {
         "X-API-Key": api_key,
@@ -47,12 +37,10 @@ def request(method, uri, body=None, api_key=None, api_secret=None):
         "User-Agent": "Mozilla/5.0",
         "Accept": "application/json",
     }
-
     data = None
     if body is not None:
         data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
-
     req = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -87,10 +75,6 @@ def save_state(state):
 
 
 def load_current_config():
-    """
-    تنظیمات رو از config.json می‌خونه.
-    اگه فایل در حال آپدیت بود (خطا داد)، مقادیر پیش‌فرض برمی‌گردونه.
-    """
     defaults = {
         "max_loss_usd": 1.0,
         "reward_ratio": 5.0,
@@ -101,11 +85,9 @@ def load_current_config():
         "tt_api_key": None,
         "tt_api_secret": None,
     }
-    
     try:
         with open("config.json", "r") as f:
             cfg = json.load(f)
-        # مقادیر فایل رو با defaults ادغام می‌کنیم (اگه کلیدی نبود، پیش‌فرض بمونه)
         for k, v in defaults.items():
             if k not in cfg:
                 cfg[k] = v
@@ -115,11 +97,7 @@ def load_current_config():
         return defaults
 
 
-# ============================================================
-# چرخه‌ی اصلی
-# ============================================================
 def run_riskguard_cycle(state):
-    # 🌟 هر بار تنظیمات رو از اول می‌خونیم
     CFG = load_current_config()
     
     API_KEY = CFG.get("tt_api_key")
@@ -156,7 +134,6 @@ def run_riskguard_cycle(state):
     if not open_positions:
         return
 
-    # قانون تک معامله / حداکثر معاملات
     if ONLY_ONE_TRADE and len(open_positions) > 1:
         open_positions.sort(key=lambda p: (p.get("createdAt", ""), p.get("id")))
         oldest_position = open_positions[0]
@@ -214,7 +191,6 @@ def run_riskguard_cycle(state):
                 "is_profit_locked": False,
             }
 
-        # قفل سود
         trigger_threshold = MAX_LOSS_USD * TRIGGER_RATIO
         if unrealized_pnl >= trigger_threshold and not state[key].get("is_profit_locked", False):
             print(f"🎯 قفل سود {symbol} روی {profit_sl_price}")
@@ -223,7 +199,6 @@ def run_riskguard_cycle(state):
             payload["stopLoss"] = str(profit_sl_price)
             needs_update = True
 
-        # کنترل حد ضرر
         if not needs_update:
             if current_sl is None or str(current_sl).strip() == "" or float(current_sl or 0) == 0:
                 print(f"⚠️ SL {symbol} حذف شده بود! تنظیم مجدد")
@@ -247,7 +222,6 @@ def run_riskguard_cycle(state):
                     print(f"SL {symbol} جابجا شد: {saved_sl_f} -> {current_sl_f}")
                     state[key]["sl"] = current_sl_f
 
-        # کنترل حد سود
         target_tp_f = float(state[key]["tp"])
         if current_tp is None or str(current_tp).strip() == "" or float(current_tp or 0) == 0:
             print(f"⚠️ TP {symbol} حذف شده بود! تنظیم مجدد")
@@ -264,7 +238,6 @@ def run_riskguard_cycle(state):
                 payload["takeProfit"] = str(target_tp_f)
                 needs_update = True
 
-        # اعمال تغییرات
         if needs_update:
             if "stopLoss" not in payload:
                 payload["stopLoss"] = str(current_sl) if current_sl else str(state[key]["sl"])
