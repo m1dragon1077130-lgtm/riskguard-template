@@ -1,8 +1,10 @@
 {
-  "max_loss_usd": 1.0,
-  "reward_ratio": 5.0,
-  "trigger_ratio": 2.0,
-  "lock_profit_ratio": 1.0,
+  "max_loss_usd": 1,
+  "reward_ratio": 5,
+  "trigger_ratio": 2,
+  "lock_profit_ratio": 1,
   "max_positions": 1,
-  "is_active": true
+  "is_active": true,
+  "tt_api_key": "hLgQsWQGlz05Bsxl3v1g9JjAOB8ut8NE2S-t7vcA",
+  "tt_api_secret": "2336b60c555a46ddb5f53d735f1cf8516e0c9e72642f972e63808993bca23a1e"
 }
