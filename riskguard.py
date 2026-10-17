@@ -1,6 +1,6 @@
 """
 RiskGuard — ربات مدیریت ریسک
-پارامترها از config.json خونده می‌شن
+پارامترها در هر چرخه از config.json خونده می‌شن
 """
 
 import os
@@ -14,45 +14,11 @@ import urllib.error
 
 
 # ============================================================
-# لود کردن config از فایل
-# ============================================================
-def load_config():
-    try:
-        with open("config.json", "r") as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"❌ خطا در خواندن config.json: {e}")
-        sys.exit(1)
-
-
-CFG = load_config()
-
-API_KEY = CFG.get("tt_api_key")
-API_SECRET = CFG.get("tt_api_secret")
-
-if not API_KEY or not API_SECRET:
-    print("❌ خطا: tt_api_key یا tt_api_secret توی config.json نیست")
-    sys.exit(1)
-
-MAX_LOSS_USD = CFG.get("max_loss_usd", 1.0)
-REWARD_RATIO = CFG.get("reward_ratio", 5.0)
-TRIGGER_RATIO = CFG.get("trigger_ratio", 2.0)
-LOCK_PROFIT_RATIO = CFG.get("lock_profit_ratio", 1.0)
-MAX_POSITIONS = CFG.get("max_positions", 1)
-IS_ACTIVE = CFG.get("is_active", True)
-
-if not IS_ACTIVE:
-    print("⏸ ربات غیرفعال است.")
-    sys.exit(0)
-
-
-# ============================================================
-# تنظیمات
+# تنظیمات ثابت
 # ============================================================
 MAX_RUN_TIME_SECONDS = 5 * 3600 + 50 * 60
 CHECK_INTERVAL_SECONDS = 20
 
-ONLY_ONE_TRADE = MAX_POSITIONS == 1
 LOCK_STOP_LOSS = True
 
 BASE_URL = "https://apiv2.thetruetrade.io"
@@ -62,20 +28,20 @@ STATE_FILE = "state.json"
 
 
 # ============================================================
-# توابع API
+# توابع کمکی
 # ============================================================
 def sign(secret, timestamp, method, uri):
     payload = f"{timestamp}{method}{uri}"
     return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
-def request(method, uri, body=None):
+def request(method, uri, body=None, api_key=None, api_secret=None):
     timestamp = str(int(time.time() * 1000))
-    signature = sign(API_SECRET, timestamp, method.upper(), uri)
+    signature = sign(api_secret, timestamp, method.upper(), uri)
 
     url = BASE_URL + uri
     headers = {
-        "X-API-Key": API_KEY,
+        "X-API-Key": api_key,
         "X-Timestamp": timestamp,
         "X-Signature": signature,
         "User-Agent": "Mozilla/5.0",
@@ -120,11 +86,63 @@ def save_state(state):
         print(f"خطا در ذخیره فایل state: {e}")
 
 
+def load_current_config():
+    """
+    تنظیمات رو از config.json می‌خونه.
+    اگه فایل در حال آپدیت بود (خطا داد)، مقادیر پیش‌فرض برمی‌گردونه.
+    """
+    defaults = {
+        "max_loss_usd": 1.0,
+        "reward_ratio": 5.0,
+        "trigger_ratio": 2.0,
+        "lock_profit_ratio": 1.0,
+        "max_positions": 1,
+        "is_active": True,
+        "tt_api_key": None,
+        "tt_api_secret": None,
+    }
+    
+    try:
+        with open("config.json", "r") as f:
+            cfg = json.load(f)
+        # مقادیر فایل رو با defaults ادغام می‌کنیم (اگه کلیدی نبود، پیش‌فرض بمونه)
+        for k, v in defaults.items():
+            if k not in cfg:
+                cfg[k] = v
+        return cfg
+    except Exception as e:
+        print(f"⚠️ خطا در خواندن config.json: {e}")
+        return defaults
+
+
 # ============================================================
 # چرخه‌ی اصلی
 # ============================================================
 def run_riskguard_cycle(state):
-    response = request("GET", f"{FUTURES_PREFIX}/positions")
+    # 🌟 هر بار تنظیمات رو از اول می‌خونیم
+    CFG = load_current_config()
+    
+    API_KEY = CFG.get("tt_api_key")
+    API_SECRET = CFG.get("tt_api_secret")
+    
+    if not API_KEY or not API_SECRET:
+        print("❌ خطا: tt_api_key یا tt_api_secret توی config.json نیست")
+        return
+    
+    MAX_LOSS_USD = CFG.get("max_loss_usd", 1.0)
+    REWARD_RATIO = CFG.get("reward_ratio", 5.0)
+    TRIGGER_RATIO = CFG.get("trigger_ratio", 2.0)
+    LOCK_PROFIT_RATIO = CFG.get("lock_profit_ratio", 1.0)
+    MAX_POSITIONS = CFG.get("max_positions", 1)
+    IS_ACTIVE = CFG.get("is_active", True)
+    
+    ONLY_ONE_TRADE = MAX_POSITIONS == 1
+
+    if not IS_ACTIVE:
+        print("⏸ ربات غیرفعال است.")
+        sys.exit(0)
+
+    response = request("GET", f"{FUTURES_PREFIX}/positions", api_key=API_KEY, api_secret=API_SECRET)
     if response is None:
         print("عدم دریافت اطلاعات پوزیشن‌ها.")
         return
@@ -138,9 +156,9 @@ def run_riskguard_cycle(state):
     if not open_positions:
         return
 
+    # قانون تک معامله / حداکثر معاملات
     if ONLY_ONE_TRADE and len(open_positions) > 1:
         open_positions.sort(key=lambda p: (p.get("createdAt", ""), p.get("id")))
-
         oldest_position = open_positions[0]
         oldest_id = oldest_position["id"]
         print(f"قدیمی‌ترین پوزیشن نگه داشته شد: ID {oldest_id}")
@@ -148,8 +166,7 @@ def run_riskguard_cycle(state):
         for p in open_positions[1:]:
             pid = p["id"]
             print(f"بستن پوزیشن جدیدتر {pid}")
-            request("POST", f"{FUTURES_PREFIX}/positions/{pid}/close", {"orderType": "MARKET"})
-
+            request("POST", f"{FUTURES_PREFIX}/positions/{pid}/close", {"orderType": "MARKET"}, api_key=API_KEY, api_secret=API_SECRET)
         open_positions = [oldest_position]
 
     for p in open_positions:
@@ -197,6 +214,7 @@ def run_riskguard_cycle(state):
                 "is_profit_locked": False,
             }
 
+        # قفل سود
         trigger_threshold = MAX_LOSS_USD * TRIGGER_RATIO
         if unrealized_pnl >= trigger_threshold and not state[key].get("is_profit_locked", False):
             print(f"🎯 قفل سود {symbol} روی {profit_sl_price}")
@@ -205,6 +223,7 @@ def run_riskguard_cycle(state):
             payload["stopLoss"] = str(profit_sl_price)
             needs_update = True
 
+        # کنترل حد ضرر
         if not needs_update:
             if current_sl is None or str(current_sl).strip() == "" or float(current_sl or 0) == 0:
                 print(f"⚠️ SL {symbol} حذف شده بود! تنظیم مجدد")
@@ -228,6 +247,7 @@ def run_riskguard_cycle(state):
                     print(f"SL {symbol} جابجا شد: {saved_sl_f} -> {current_sl_f}")
                     state[key]["sl"] = current_sl_f
 
+        # کنترل حد سود
         target_tp_f = float(state[key]["tp"])
         if current_tp is None or str(current_tp).strip() == "" or float(current_tp or 0) == 0:
             print(f"⚠️ TP {symbol} حذف شده بود! تنظیم مجدد")
@@ -244,13 +264,14 @@ def run_riskguard_cycle(state):
                 payload["takeProfit"] = str(target_tp_f)
                 needs_update = True
 
+        # اعمال تغییرات
         if needs_update:
             if "stopLoss" not in payload:
                 payload["stopLoss"] = str(current_sl) if current_sl else str(state[key]["sl"])
             if "takeProfit" not in payload:
                 payload["takeProfit"] = str(current_tp) if current_tp else str(state[key]["tp"])
 
-            result = request("PATCH", f"{FUTURES_PREFIX}/positions/{pid}/tpsl", payload)
+            result = request("PATCH", f"{FUTURES_PREFIX}/positions/{pid}/tpsl", payload, api_key=API_KEY, api_secret=API_SECRET)
             if result is not None:
                 print(f"✅ TP/SL {symbol} آپدیت شد.")
             else:
@@ -267,9 +288,6 @@ def run_riskguard_cycle(state):
 def main():
     start_time = time.time()
     print("🚀 RiskGuard شروع شد...")
-    print(f"📊 MAX_LOSS_USD: {MAX_LOSS_USD}")
-    print(f"📊 REWARD_RATIO: {REWARD_RATIO}")
-    print(f"📊 TRIGGER_RATIO: {TRIGGER_RATIO}")
 
     while True:
         elapsed = time.time() - start_time
